@@ -6,7 +6,7 @@ An implementation of Spring Session extension based on AWS DynamoDB as a Session
 This work still under development and should be used for experimentation purposes only. **Please 
 use on your own responsibility**.
 
-#Configuration
+# Configuration
 ```
 @Configuration
 @EnableDynamoDBHttpSession
@@ -21,9 +21,10 @@ public class SessionConfig {
 ```
 
 Override defaults in your properties with:
-
+```
 spring.session.dynamodb.tableName
 spring.session.dynamodb.maxInactiveIntervalInSeconds
+```
 
 # Misc
 - Docker compose config can be found in /docker
