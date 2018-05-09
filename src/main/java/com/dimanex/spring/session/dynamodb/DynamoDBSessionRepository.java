@@ -19,33 +19,20 @@ package com.dimanex.spring.session.dynamodb;
 import com.amazonaws.services.dynamodbv2.document.DynamoDB;
 import com.amazonaws.services.dynamodbv2.document.Item;
 import com.amazonaws.util.IOUtils;
-
-import org.springframework.session.ExpiringSession;
+import lombok.extern.log4j.Log4j2;
+import org.springframework.session.Session;
 import org.springframework.session.SessionRepository;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
-import java.io.Serializable;
+import java.io.*;
 import java.nio.ByteBuffer;
-import java.time.ZoneId;
-import java.time.ZonedDateTime;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.TimeUnit;
-
-import lombok.extern.log4j.Log4j2;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.*;
 
 @Log4j2
 public class DynamoDBSessionRepository implements SessionRepository<DynamoDBSessionRepository.DynamoDBSession> {
 
     private static final String ITEM_SESSION_ID_ATTRIBUTE_NAME = "SessionID";
-    private static final String ITEM_SESSION_EXPIRATION_TIME_ATTRIBUTE_NAME = "SessionExpirationTime";
     private static final String ITEM_SESSION_DATA_ATTRIBUTE_NAME = "SessionData";
 
     private final DynamoDB dynamoDB;
@@ -73,7 +60,7 @@ public class DynamoDBSessionRepository implements SessionRepository<DynamoDBSess
     }
 
     @Override
-    public DynamoDBSession getSession(String id) {
+    public DynamoDBSession findById(String id) {
         try {
             Item sessionItem = this.dynamoDB.getTable(this.sessionsTableName).getItem(ITEM_SESSION_ID_ATTRIBUTE_NAME,
                     id);
@@ -83,10 +70,10 @@ public class DynamoDBSessionRepository implements SessionRepository<DynamoDBSess
             DynamoDBSession session = toSession(sessionItem);
             if (session.isExpired()) {
                 log.info("Session: '{}' has expired. It will be deleted.", id);
-                delete(id);
+                deleteById(id);
                 return null;
             }
-            session.setLastAccessedTime(ZonedDateTime.now(ZoneId.systemDefault()).toInstant().toEpochMilli());
+            session.setLastAccessedTime(Instant.now());
             return session;
         } catch (IOException | ClassNotFoundException e) {
             log.error(e);
@@ -95,64 +82,65 @@ public class DynamoDBSessionRepository implements SessionRepository<DynamoDBSess
     }
 
     @Override
-    public void delete(String id) {
+    public void deleteById(String id) {
         this.dynamoDB.getTable(this.sessionsTableName).deleteItem(ITEM_SESSION_ID_ATTRIBUTE_NAME, id);
     }
 
-    public static class DynamoDBSession implements ExpiringSession, Serializable {
+    public static class DynamoDBSession implements Session, Serializable {
 
         private static final long serialVersionUID = 6459851973327402721L;
 
-        private final String id;
-        private long creationTime;
-        private long lastAccessedTime;
-        private int maxInactiveInterval;
+        private String id;
+        private Instant creationTime;
+        private Instant lastAccessedTime;
+        private Duration maxInactiveInterval;
         private Map<String, Object> attributes;
 
         public DynamoDBSession(String id, int maxInactiveInterval) {
             this.id = id;
-            this.creationTime = ZonedDateTime.now(ZoneId.systemDefault()).toInstant().toEpochMilli();
+            this.creationTime = Instant.now();
             this.lastAccessedTime = this.creationTime;
-            this.maxInactiveInterval = maxInactiveInterval;
+            this.maxInactiveInterval = Duration.ofSeconds(maxInactiveInterval);
             attributes = new HashMap<>();
         }
 
         @Override
-        public long getCreationTime() {
-            return this.creationTime;
-        }
-
-        @Override
-        public void setLastAccessedTime(long lastAccessedTime) {
+        public void setLastAccessedTime(Instant lastAccessedTime) {
             this.lastAccessedTime = lastAccessedTime;
         }
 
         @Override
-        public long getLastAccessedTime() {
+        public Instant getLastAccessedTime() {
             return this.lastAccessedTime;
         }
 
         @Override
-        public void setMaxInactiveIntervalInSeconds(int interval) {
+        public void setMaxInactiveInterval(Duration interval) {
             this.maxInactiveInterval = interval;
         }
 
         @Override
-        public int getMaxInactiveIntervalInSeconds() {
+        public Duration getMaxInactiveInterval() {
             return this.maxInactiveInterval;
         }
 
         @Override
         public boolean isExpired() {
-            final long actualInactiveInterval = ZonedDateTime.now(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                    - this.lastAccessedTime;
-            return this.maxInactiveInterval >= 0 && actualInactiveInterval > TimeUnit.SECONDS.toMillis(this
-                    .maxInactiveInterval);
+            final Duration actualInactiveInterval = Duration.between(this.lastAccessedTime, Instant.now());
+            return maxInactiveInterval.minus(actualInactiveInterval).isNegative();
         }
 
         @Override
         public String getId() {
             return this.id;
+        }
+
+        @Override
+        public String changeSessionId() {
+//            TODO: Not sure if this works as intended.
+            String sessionId = UUID.randomUUID().toString();
+            this.id = sessionId;
+            return sessionId;
         }
 
         @Override
@@ -183,13 +171,16 @@ public class DynamoDBSessionRepository implements SessionRepository<DynamoDBSess
             this.attributes.remove(attributeName);
         }
 
+        @Override
+        public Instant getCreationTime() {
+            return this.creationTime;
+        }
     }
 
     private Item toDynamoDBItem(DynamoDBSession session) throws IOException {
         ObjectOutputStream oos = null;
         try {
             Item item = new Item().withPrimaryKey(ITEM_SESSION_ID_ATTRIBUTE_NAME, session.getId());
-            updateTimeToLive(item, session);
             ByteArrayOutputStream fos = new ByteArrayOutputStream();
             oos = new ObjectOutputStream(fos);
             oos.writeObject(session);
@@ -212,13 +203,4 @@ public class DynamoDBSessionRepository implements SessionRepository<DynamoDBSess
             IOUtils.closeQuietly(ois, null);
         }
     }
-
-    private void updateTimeToLive(Item item, DynamoDBSession session) {
-        if (session.getMaxInactiveIntervalInSeconds() >= 0) {
-            final long ttlInSeconds = TimeUnit.MILLISECONDS.toSeconds(session.getLastAccessedTime()) +
-                    session.getMaxInactiveIntervalInSeconds();
-            item.withNumber(ITEM_SESSION_EXPIRATION_TIME_ATTRIBUTE_NAME, ttlInSeconds);
-        }
-    }
-
 }
