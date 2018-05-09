@@ -1,0 +1,35 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  tableName:
+    Type: String
+  dynamoReadsPerSecond:
+    Description: How many reads per second should be provisioned?
+    Type: Number
+  dynamoWritesPerSecond:
+    Description: How many writes per second should be provisioned?
+    Type: Number
+Resources:
+  sessionTable:
+    Properties:
+      AttributeDefinitions:
+      - AttributeName: SessionID
+        AttributeType: S
+      KeySchema:
+      - AttributeName: SessionID
+        KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits:
+          Ref: dynamoReadsPerSecond
+        WriteCapacityUnits:
+          Ref: dynamoWritesPerSecond
+      TableName: 
+          Ref: tableName
+      TimeToLiveSpecification:
+        AttributeName: SessionExpirationTime
+        Enabled: true
+    Type: AWS::DynamoDB::Table
+Outputs:
+  sessionTableArn:
+    Value: !GetAtt sessionTable.Arn
+  
+

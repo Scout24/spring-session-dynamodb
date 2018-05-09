@@ -1,0 +1,7 @@
+dynamodb:
+  build: docker/dynamodb
+  ports:
+    - "7777:7777"
+  command: -sharedDb -port 7777
+  volumes:
+    - /etc/localtime:/etc/localtime:ro
