@@ -6,7 +6,7 @@
 
     <groupId>com.dimanex</groupId>
     <artifactId>spring-session-dynamodb</artifactId>
-    <version>0.0.1-is24</version>
+    <version>0.0.2-is24</version>
 
     <name>Spring Session DynamoDB</name>
     <description>Spring Session DynamoDB</description>
